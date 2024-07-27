@@ -2,8 +2,8 @@ const express = require("express");
 const axios = require("axios");
 const EventEmitter = require("events");
 const baseurl = `http://localhost:300`;
-const minDelay = 150;
-const maxDelay = 300;
+const minDelay = 100;
+const maxDelay = 200;
 
 class statemachine {
   constructor(id, n) {
@@ -18,7 +18,7 @@ class statemachine {
     // persistant state
     this.currentTerm = 0;
     this.votedFor = null;
-    this.log = [{ entry: { x: 10 }, term: 0 }];
+    this.log = [{ entry: {}, term: 0 }];
 
     // volatile state
     this.commitIndex = 0;
@@ -70,22 +70,6 @@ class statemachine {
       res.send(200, this.log);
     });
 
-    app.get("/kill", (req, res) => {
-      // reset to initial state
-      this.currentState = this.validStates.follower;
-      // persistant state
-      this.currentTerm = 0;
-      this.votedFor = null;
-      this.log = [{ entry: { x: 10 }, term: 0 }];
-      // volatile state
-      this.commitIndex = 0;
-      this.lastApplied = 0;
-      // volatile state for leader
-      this.nextIndex = [];
-      this.matchIndex = [];
-      res.send(200, true);
-    });
-
     app.post("/", async (req, res) => {
       if (req.body == null) {
         res.send(400, false);
@@ -94,7 +78,7 @@ class statemachine {
         let success = false;
         while (success != true) {
           success = await this.sendAppendEntries();
-          console.log(success);
+          //console.log(success);
         }
         this.lastApplied++;
         this.commitIndex++;
@@ -102,32 +86,16 @@ class statemachine {
       }
     });
 
-    // app.post("/appendEntries", (req, res) => {
-    //   let success = false;
-    //   if (req.body.term >= this.currentTerm) {
-    //     this.currentState = this.validStates.follower;
-    //     this.timer.reset(minDelay, maxDelay);
-    //     this.currentTerm = req.body.term;
-    //   }
-    //   if (this.log.length > req.body.prevLogIndex) {
-    //     if (this.log[req.body.prevLogIndex].term == req.body.prevLogTerm)
-    //       success = true;
-    //   } else {
-    //     req.body.entries.forEach((e) => this.log.push(e));
-    //     this.lastApplied = this.log.length;
-    //   }
-    //   if (req.body.leaderCommit > this.commitIndex)
-    //     this.commitIndex = Math.min(req.body.leaderCommit, this.lastApplied);
-    //   res.send(200, { term: this.currentTerm, success: success });
-    //   this.timer.reset(minDelay, maxDelay);
-    // });
-
     app.post("/appendEntries", (req, res) => {
       if (req.body.entries.length == 0) {
-        this.currentTerm = Math.max(req.body.term, this.currentTerm);
-        this.currentState = this.validStates.follower;
-        this.timer.reset(minDelay, maxDelay);
-        res.send(200, { term: this.currentTerm, success: true });
+        if (req.body.term >= this.currentTerm) {
+          this.currentTerm = req.body.term;
+          this.currentState = this.validStates.follower;
+          this.timer.reset(minDelay, maxDelay);
+          res.send(200, { term: this.currentTerm, success: true });
+        } else {
+          res.send(200, { term: this.currentTerm, success: false });
+        }
       } else {
         if (req.body.term < this.currentTerm) {
           res.send(200, { term: this.currentTerm, success: false });
@@ -161,28 +129,25 @@ class statemachine {
 
     app.post("/requestVote", (req, res) => {
       let vote = false;
-      // console.log(req.body.data);
-      if (req.body.data.term < this.currentTerm) {
+      if (req.body.term < this.currentTerm) {
         vote = false;
-        console.log(
-          `${this.id} has voted false for ${req.body.data.candidateId}`,
-        );
+        //console.log(`${this.id} has voted false for ${req.body.candidateId}`);
       } else if (
-        (this.votedFor == null || this.votedFor == req.body.data.candidateId) &&
-        req.body.data.term >= this.currentTerm
+        ((req.votedFor == null || this.votedFor == req.body.candidateId) &&
+          req.body.lastLogTerm > this.currentTerm) ||
+        (req.body.lastLogTerm == this.currentTerm &&
+          req.body.lastLogIndex >= this.log.length - 1)
       ) {
-        console.log(
-          `${this.id} has voted true for ${req.body.data.candidateId}`,
-        );
-        this.currentTerm = req.body.data.term;
-        this.votedFor = req.body.data.candidateId;
+        //console.log(`${this.id} has voted true for ${req.body.candidateId}`);
+        this.currentTerm = req.body.term;
+        this.votedFor = req.body.candidateId;
         vote = true;
       }
       res.send(200, { term: this.currentTerm, granted: vote });
     });
 
     app.listen(this.port, () => {
-      console.log(`node ${this.id} listing to http://localhost:${this.port}`);
+      //console.log(`node ${this.id} listing to http://localhost:${this.port}`);
     });
   }
 
@@ -198,7 +163,7 @@ class statemachine {
         }
       }
     } catch (err) {
-      // console.log(`${this.id} client: ping error!`);
+      //console.log(`${this.id} client: ping error!`);
     }
   }
 
@@ -211,15 +176,12 @@ class statemachine {
         if (i != this.id) {
           votereqs.push(
             axios.post(`${baseurl}${i}/requestVote`, {
-              data: {
-                term: this.currentTerm,
-                candidateId: this.id,
-                // lastLogIndex: this.log.length,
-                // lastLogTerm: this.log[this.log.length].term ?? null,
-              },
+              term: this.currentTerm,
+              candidateId: this.id,
+              lastLogIndex: this.log.length - 1,
+              lastLogTerm: this.log[this.log.length - 1].term,
             }),
           );
-          // console.log("res:", res.data);
         }
       }
       const voteress = await Promise.all(votereqs);
@@ -236,7 +198,7 @@ class statemachine {
         return true;
       } else return false;
     } catch (err) {
-      console.log(`${this.id} client: sendVoteRequest error!, ${err.message}`);
+      //console.log(`${this.id} client: sendVoteRequest error!, ${err.message}`);
       return false;
     }
   }
@@ -261,9 +223,13 @@ class statemachine {
           }
         }
         const ress = await Promise.all(reqs);
+        ress.forEach((res) => {
+          if (res.data.term > this.currentTerm)
+            this.currentState == this.validStates.follower;
+        });
         return true;
       } catch (err) {
-        console.log(`${this.id} client: AE heartbeat error! : ${err.message}`);
+        //console.log(`${this.id} client: AE heartbeat error! : ${err.message}`);
       }
     } else {
       try {
@@ -271,10 +237,10 @@ class statemachine {
         for (i = 1; i <= this.n; i++) {
           if (i != this.id) {
             console.log(`${this.id} to ${i}`);
-            console.log(this.log.slice(this.nextIndex[i], this.log.length));
-            console.log(
-              this.lastApplied > 0 ? this.log[this.lastApplied].term : 0,
-            );
+            //console.log(this.log.slice(this.nextIndex[i], this.log.length));
+            //console.log(
+            // this.lastApplied > 0 ? this.log[this.lastApplied].term : 0,
+            // );
             reqs.push(
               axios.post(`${baseurl}${i}/appendEntries`, {
                 term: this.currentTerm,
@@ -292,14 +258,14 @@ class statemachine {
         for (i = 1; i <= this.n; i++) {
           if (i != this.id) {
             const res = ress.shift();
-            console.log(`${i} sent ${res.data.success}`);
+            // console.log(`${i} sent ${res.data.success}`);
             if (res.data.success == true) {
               this.nextIndex[i]++;
               successes++;
             } else {
               let outcome = false;
               while (!outcome) {
-                console.log(`retrying for ${i}`);
+                // console.log(`retrying for ${i}`);
                 this.nextIndex[i] = this.nextIndex[i] - 1;
                 const retry = await axios.post(`${baseurl}${i}/appendEntries`, {
                   term: this.currentTerm,
@@ -318,7 +284,7 @@ class statemachine {
         }
         return successes > n / 2;
       } catch (err) {
-        console.log(`${this.id} client: AE error! : ${err.message}`);
+        //console.log(`${this.id} client: AE error! : ${err.message}`);
       }
     }
   }
@@ -333,10 +299,10 @@ class statemachine {
 
   async evaluateState() {
     if (this.currentState == this.validStates.follower) {
-      console.log(`${this.id} is follower | ${this.currentTerm} | ${this.log}`);
+      //console.log(`${this.id} is follower | ${this.currentTerm}`);
       this.currentState = this.validStates.candidate;
     } else if (this.currentState == this.validStates.leader) {
-      console.log(`${this.id} is leader | ${this.currentTerm} | ${this.log}`);
+      console.log(`${this.id} is leader | ${this.currentTerm}`);
       for (i = 1; i <= n; i++) this.nextIndex[i] = this.log.length;
       const randomDelay = this.getRandomDelay(minDelay / 10, maxDelay / 10);
       // setTimeout(async () => {
@@ -345,9 +311,7 @@ class statemachine {
     } else if (this.currentState == this.validStates.candidate) {
       //   this.timer = new statemachine.electionTimer();
       this.currentTerm++;
-      console.log(
-        `${this.id} is candidate | ${this.currentTerm} | ${this.log}`,
-      );
+      //console.log(`${this.id} is candidate | ${this.currentTerm}`);
       this.votedFor = this.id;
       this.timer.reset(minDelay, maxDelay);
       let winner = await this.sendVoteRequest();

@@ -1,8 +1,8 @@
 const statemachine = require("./statemachine");
 const { argv } = require("node:process");
 
-if (argv.length < 3) {
-  console.log(`error: Missing argument, usage npm index.js [number of nodes]`);
+if (argv.length < 4) {
+  console.log(`usage : npm index.js [node number] [number of nodes]`);
   return;
 }
 
