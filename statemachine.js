@@ -71,7 +71,7 @@ class statemachine {
     });
 
     app.post("/", async (req, res) => {
-      if (req.body == null) {
+      if (req.body === null) {
         res.send(400, false);
       } else {
         this.log.push({ entry: req.body, term: this.currentTerm });
@@ -119,7 +119,7 @@ class statemachine {
           if (req.body.leaderCommit > this.commitIndex) {
             this.commitIndex = Math.min(
               req.body.leaderCommit,
-              this.log.length - 1,
+              this.log.length - 1
             );
           }
           res.send(200, { term: this.currentTerm, success: true });
@@ -180,7 +180,7 @@ class statemachine {
               candidateId: this.id,
               lastLogIndex: this.log.length - 1,
               lastLogTerm: this.log[this.log.length - 1].term,
-            }),
+            })
           );
         }
       }
@@ -218,7 +218,7 @@ class statemachine {
                 prevLogTerm: this.currentTerm,
                 entries: [],
                 leaderCommit: this.commitIndex,
-              }),
+              })
             );
           }
         }
@@ -249,7 +249,7 @@ class statemachine {
                 prevLogTerm: this.log[this.nextIndex[i] - 1].term,
                 entries: this.log.slice(this.nextIndex[i], this.log.length),
                 leaderCommit: this.commitIndex,
-              }),
+              })
             );
           }
         }
